@@ -1,149 +1,560 @@
+import React, { useState, useEffect, useRef } from "react";
 import { connect, styled } from "frontity";
 import Link from "./link";
-import Navigation from "./navigation/navigation";
-import SearchButton from "./search/search-button";
-import SearchModal from "./search/search-modal";
-import MobileSearchButton from "./mobile/search-button";
-import MobileMenuButton from "./mobile/menu-button";
-import MobileMenuModal from "./mobile/menu-modal";
+import { getCart, removeCartItem, removeFromCart, getWishlist } from "../utils";
 
-const Header = ({ state }) => {
-  const { title, description } = state.frontity;
+const Header = ({ state, actions }) => {
   const { headerBg } = state.theme.colors;
+  const [cartItems, setCartItems] = useState([]);
+  // const [cartData, setcartData] = useState([]);
+  const [cartCount, setCartCount] = useState(0);
+  const [showCart, setShowCart] = useState(false);
+  const [wishlist, setWishlist] = useState([]);
+  const [subtotal, setSubtotal] = useState("₹0.00");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searchPerformed, setSearchPerformed] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [headerData, setHeaderData] = useState(null);
+  const [token, setToken] = useState(null);
+  const [Mobile, setMobile] = useState(false);
+  const [isProductPage, setisProductPage] = useState(false);
+  const { link } = state.router;
 
+  // Refs for click outside detection
+  const cartRef = useRef(null);
+  const searchRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    console.log(link, 'linklink');
+    if (window?.innerWidth <= 767 && link?.includes('product')) {
+      setMobile(true);
+      setisProductPage(true);
+    } else {
+      setMobile(false);
+      setisProductPage(false);
+    }
+  }, [link]);
+
+  useEffect(() => {
+    const loadCart = async () => {
+      const storedToken = localStorage.getItem("jwt_token");
+      setToken(storedToken);
+
+      if (storedToken && storedToken.split(".").length === 3) {
+        // ✅ Logged-in user cart
+        const cartData = await getCart();
+        if (cartData && cartData.items) {
+          setCartItems(cartData.items);
+          setCartCount(cartData.count);
+          setSubtotal(cartData.cart_total);
+        }
+      } else {
+        // ✅ Guest cart from localStorage
+        const guestCart = JSON.parse(localStorage.getItem("guest_cart") || "[]");
+        setCartItems(guestCart);
+
+        // Count items and subtotal manually
+        const guestCount = guestCart.reduce((acc, item) => acc + item.quantity, 0);
+        const guestSubtotal = guestCart.reduce((acc, item) => {
+          const priceNum = parseFloat(
+            (item.price || "0").toString().replace(/[^0-9.]/g, "")
+          );
+          return acc + priceNum * item.quantity;
+        }, 0);
+
+        setCartCount(guestCount);
+        setSubtotal(guestSubtotal.toFixed(2));
+      }
+    };
+
+    // Call on mount
+    loadCart();
+
+    // Listen for cart changes
+    window.addEventListener("userLoggedIn", loadCart);
+    window.addEventListener("userLoggedOut", loadCart);
+    window.addEventListener("cartUpdated", loadCart);
+
+    return () => {
+      window.removeEventListener("userLoggedIn", loadCart);
+      window.removeEventListener("userLoggedOut", loadCart);
+      window.removeEventListener("cartUpdated", loadCart);
+    };
+  }, []);
+
+  // Header data fetch (separate useEffect)
+  useEffect(() => {
+    fetch("https://www.croscrow.com/a/wp-json/theme/v1/header")
+      .then((res) => res.json())
+      .then((data) => {
+        setHeaderData(data);
+        localStorage.setItem('headerData', JSON.stringify(data));
+      })
+      .catch((e) => console.error("Header fetch error:", e));
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (cartRef.current && !cartRef.current.contains(event.target)) {
+        setShowCart(false);
+      }
+
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setSearchPerformed(false);
+        setResults([]);
+        setQuery("");
+        setShowSearchResults(false);
+      }
+    };
+
+    const handleScroll = () => {
+      setShowCart(false);
+      setSearchPerformed(false);
+      setResults([]);
+      setQuery("");
+      setShowSearchResults(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  const handleCartClick = () => {
+    setShowCart(!showCart)
+  }
+
+  const handleRemove = async (cartItemKey) => {
+    const success = await removeCartItem(state, cartItemKey);
+    if (success) {
+      const updatedCart = await getCart();
+      setCartItems(updatedCart.items);
+      setCartCount(updatedCart.count);
+      setSubtotal(updatedCart.subtotal);
+    }
+  };
+
+  const parsePrice = (html) => {
+    if (!html) return "";
+  
+    const div = document.createElement("div");
+    div.innerHTML = html;
+  
+    const oldPrice = div.querySelector("del");
+    const newPrice = div.querySelector("ins");
+    const normalPrice = div.querySelector(".woocommerce-Price-amount");
+  
+    if (oldPrice && newPrice) {
+      // Discounted case
+      return {
+        oldPrice: oldPrice.textContent.trim(),
+        newPrice: newPrice.textContent.trim(),
+      };
+    } else if (normalPrice) {
+      // No discount case
+      return {
+        oldPrice: null,
+        newPrice: normalPrice.textContent.trim(),
+      };
+    }
+  
+    return { oldPrice: null, newPrice: "" };
+  };  
+
+  const stripHTML = (priceHtml) => {
+    const { oldPrice, newPrice } = parsePrice(priceHtml);
+  
+    return (
+      <div>
+        {oldPrice ? (
+          <>
+            <span style={{ textDecoration: "line-through", marginRight: "8px" }}>
+              {oldPrice}
+            </span>
+            <span>{newPrice}</span>
+          </>
+        ) : (
+          <span>{newPrice}</span>
+        )}
+      </div>
+    );
+  };
+  
+  // ───── Wishlist ─────
+  useEffect(() => {
+    const loadWish = () => setWishlist(getWishlist());
+    loadWish();
+    window.addEventListener("wishlistUpdated", loadWish);
+    return () => window.removeEventListener("wishlistUpdated", loadWish);
+  }, []);
+
+  // ───── Search Logic ─────
+  const performSearch = async (searchQuery) => {
+    if (!searchQuery.trim()) {
+      setResults([]);
+      setSearchPerformed(false);
+      setIsSearching(false);
+      setShowSearchResults(false);
+      return;
+    }
+
+    setIsSearching(true);
+    setShowSearchResults(true);
+    try {
+      const res = await fetch(
+        `https://www.croscrow.com/a/wp-json/wc/v3/products?search=${encodeURIComponent(
+          searchQuery
+        )}&consumer_key=ck_2732dde9479fa4adf07d8c7269ae22f39f2c74a5&consumer_secret=cs_14996e7e8eed396bced4ac30a0acfd9fea836214`
+      );
+      const data = await res.json();
+      setResults(data);
+      setSearchPerformed(true);
+    } catch (err) {
+      console.error("Search error:", err);
+      setResults([]);
+      setSearchPerformed(true);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearch = async () => {
+    await performSearch(query);
+  };
+
+  // Debounced search on input change
+  const handleQueryChange = (e) => {
+    const newQuery = e.target.value;
+    setQuery(newQuery);
+
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Set new timeout for debounced search
+    searchTimeoutRef.current = setTimeout(() => {
+      performSearch(newQuery);
+    }, 300); // 300ms delay
+  };
+
+  // Handle search input click
+  const handleSearchInputClick = () => {
+    setShowSearchResults(true);
+    // If there's already a query and results, show them
+    if (query.trim() && (results.length > 0 || searchPerformed)) {
+      // Results are already available, just show them
+      return;
+    }
+    // If there's a query but no search has been performed yet, perform search
+    if (query.trim() && !searchPerformed) {
+      performSearch(query);
+    }
+  };
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // ───── UI ─────
   return (
     <PageHeader bg={headerBg} id="site-header">
       <HeaderInner>
-        <TitleWrapper>
-          {/* Search button on mobile */}
-          {state.theme.showSearchInHeader && <MobileSearchButton />}
+        {headerData && (
+          <HeaderTop>
+            <Link link="/">
+              <Logo src={headerData.logo} alt={headerData.site_title} />
+            </Link>
+          </HeaderTop>
+        )}
 
-          {/* Heading and Description of the site */}
-          <TitleGroup>
-            <SiteTitle>
-              <StyledLink link="/">{title}</StyledLink>
-            </SiteTitle>
-            <SiteDescription>{description}</SiteDescription>
-          </TitleGroup>
+        <HeaderNavigationWrapper ref={searchRef}>
+          {!Mobile && !isProductPage && <SearchForm onSubmit={(e) => { e.preventDefault(); handleSearch(); }}>
+            <SearchInput
+              value={query}
+              onChange={handleQueryChange}
+              onClick={handleSearchInputClick}
+              placeholder="FIND YOUR DRIP"
+            />
+            <SearchButton type="submit" disabled={isSearching}>
+              {isSearching ? (
+                <LoadingSpinner />
+              ) : (
+                <svg fill="#fff" height="20px" width="20px" version="1.1"
+                  id="Capa_1"
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 488.4 488.4"
+                  stroke="#fff">
+                  <g id="SVGRepo_bgCarrier" strokeWidth="0"></g>
+                  <g id="SVGRepo_tracerCarrier" strokeLinecap="round" strokeLinejoin="round"></g>
+                  <g id="SVGRepo_iconCarrier">
+                    <g>
+                      <g>
+                        <path d="M0,203.25c0,112.1,91.2,203.2,203.2,203.2c51.6,0,98.8-19.4,134.7-51.2l129.5,129.5c2.4,2.4,5.5,3.6,8.7,3.6 s6.3-1.2,8.7-3.6c4.8-4.8,4.8-12.5,0-17.3l-129.6-129.5c31.8-35.9,51.2-83,51.2-134.7c0-112.1-91.2-203.2-203.2-203.2 S0,91.15,0,203.25z M381.9,203.25c0,98.5-80.2,178.7-178.7,178.7s-178.7-80.2-178.7-178.7s80.2-178.7,178.7-178.7 S381.9,104.65,381.9,203.25z"></path>
+                      </g>
+                    </g>
+                  </g>
+                </svg>
+              )}
+            </SearchButton>
+          </SearchForm>}
 
-          {/* Mobile menu button and modal */}
-          <MobileMenuButton />
-          <MobileMenuModal />
-        </TitleWrapper>
-
-        <HeaderNavigationWrapper>
-          {/* Desktop navigation links */}
-          <Navigation />
-          {/* Desktop search button */}
-          {state.theme.showSearchInHeader && <SearchButton />}
+          {(showSearchResults && (searchPerformed || isSearching)) && (
+            <ResultList>
+              <div className="searchGrid">
+                {isSearching ? (
+                  <LoadingContainer>
+                    <LoadingSpinner />
+                    <p>Searching...</p>
+                  </LoadingContainer>
+                ) : results.length > 0 ? (
+                  results.map((product) => (
+                    <li key={product.id}>
+                      <Link link={`/product/${product.slug}`}>
+                        <img src={product.images[0]?.src} alt={product.name} width="40" />
+                        {product.name}
+                      </Link>
+                    </li>
+                  ))
+                ) : (
+                  <p className="no-results" style={{ marginTop: "1rem", color: "#777" }}>
+                    No result found.
+                  </p>
+                )}
+              </div>
+            </ResultList>
+          )}
         </HeaderNavigationWrapper>
+
+        {/* CART + WISHLIST ICONS */}
+        <div className="accountIcon" style={{ display: "flex", alignItems: "center" }}>
+          <div className="Myaccount">
+            <Link link="/my-account">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                width="30" height="30"
+                fill="none"
+                stroke="black"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="7" r="4" />
+                <path d="M4 20c0-4.3 4-6.5 8-6.5s8 2.2 8 6.5" />
+              </svg>
+            </Link>
+          </div>
+
+          <WishlistWrapper>
+            <Link link="/wishlist">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                width="30"
+                height="30"
+                fill="none"
+                stroke="black"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path
+                  d="M20.84 4.61a5.6 5.6 0 0 0-7.93 0L12 5.52l-0.91-0.91a5.6 5.6 0 0 0-7.93 7.93l0.91 0.91L12 21.8l7.93-7.93 0.91-0.91a5.6 5.6 0 0 0 0-7.93z"
+                />
+              </svg>
+              {wishlist.length > 0 && <WishlistCount>{wishlist.length}</WishlistCount>}
+            </Link>
+          </WishlistWrapper>
+
+          <CartWrapper ref={cartRef} onClick={() => handleCartClick()}>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              width="30"
+              height="30"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M3 3h2l2.5 10.5h11.5l2-6H6" />
+              <circle cx="9" cy="20" r="1.5" />
+              <circle cx="18" cy="20" r="1.5" />
+            </svg>
+
+            {cartCount > 0 && <CartCount>{cartCount}</CartCount>}
+            {showCart && (
+              <CartDropdown>
+                <div className="cartItems">
+                  {cartItems.length === 0 && <EmptyCart>Cart is empty</EmptyCart>}
+                  {cartItems.map((it) => (
+                    <CartItem key={it.cart_item_key}>
+                      {it.image && <CartImage src={it.image} alt={it.name} />}
+                      <div>
+                        <Link
+                          link={
+                            it.permalink
+                              ? new URL(it.permalink, window.location.origin).pathname
+                              : "#"
+                          }
+                        >
+                          <strong>{it.name}</strong>
+                        </Link>
+
+                        <div className="cartItemPrice" style={{ marginTop: 4 }}>
+                          {stripHTML(it.price)} × {it.quantity} &nbsp;=&nbsp; {stripHTML(it.total)}
+                        </div>
+                      </div>
+                      <RemoveButton onClick={() => handleRemove(it.cart_item_key)}>×</RemoveButton>
+                    </CartItem>
+                  ))}
+                </div>
+                {cartItems.length > 0 && (
+                  <div className="SubtotalDetails">
+                    <Subtotal>
+                      <strong>Subtotal:</strong><br />
+                      {stripHTML(subtotal)}
+                    </Subtotal>
+                    <CheckoutNote>
+                      Shipping, taxes, and discounts calculated at checkout.
+                    </CheckoutNote>
+                    <StyledLink link="/cart">View Cart</StyledLink>
+                  </div>
+                )}
+              </CartDropdown>
+            )}
+          </CartWrapper>
+        </div>
       </HeaderInner>
-      {/* Global search modal */}
-      <SearchModal />
     </PageHeader>
   );
 };
 
-// Connect the Header component to get access to the `state` in it's `props`
 export default connect(Header);
 
-const TitleGroup = styled.div`
-  @media (min-width: 1000px) {
-    align-items: baseline;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    margin: -1rem 0 0 -2.4rem;
-  }
-`;
-
-const TitleWrapper = styled.div`
-  align-items: center;
-  display: flex;
-  justify-content: center;
-  padding: 0 4rem;
-  text-align: center;
-  width: 100%;
-
-  @media (min-width: 1000px) {
-    width: auto;
-    margin-right: 4rem;
-    max-width: 50%;
-    padding: 0;
-    text-align: left;
-  }
-`;
-
-const PageHeader = styled.header`
-  z-index: 1;
-  background: ${(props) => props.bg};
-  position: relative;
-`;
-
+// ─── Styled Components ───
+const PageHeader = styled.header`position: relative; background: ${(p) => p.bg}; z-index: 1;`;
+const HeaderTop = styled.div`display: flex; align-items: center; gap: 1rem; padding: 1rem 2rem;`;
+const Logo = styled.img`height: 50px; width: auto;`;
 const HeaderInner = styled.div`
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  padding: 2.8rem 0;
-  max-width: 168rem;
-  z-index: 100;
-  margin-left: auto;
-  margin-right: auto;
-
-  @media (min-width: 700px) {
-    width: calc(100% - 8rem);
-  }
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2.8rem 0; max-width: 168rem; margin: 0 auto;
+  @media (min-width: 700px) { width: calc(100% - 8rem); }
 `;
-
-const SiteTitle = styled.h1`
-  font-size: 2.1rem;
-  font-weight: 600;
-  line-height: 1;
-  margin: 0;
-
-  @media (min-width: 1000px) {
-    margin: 1rem 0 0 2.4rem;
-  }
-  @media (min-width: 700px) {
-    font-size: 2.4rem;
-    font-weight: 700;
-  }
-`;
-
-const SiteDescription = styled.div`
-  margin: 0;
-  margin-top: 1rem;
-  color: #6d6d6d;
-  font-size: 1.8rem;
-  font-weight: 500;
-  display: none;
-  letter-spacing: -0.0311em;
-  transition: all 0.15s linear;
-
-  @media (min-width: 1000px) {
-    margin: 1rem 0 0 2.4rem;
-  }
-
-  @media (min-width: 700px) {
-    display: block;
-  }
-`;
-
-const StyledLink = styled(Link)`
-  text-decoration: none;
-  color: inherit;
-  display: block;
-
-  &:hover {
-    text-decoration: underline;
-  }
-`;
-
 const HeaderNavigationWrapper = styled.div`
   display: none;
+  position: relative;
+  @media (min-width: 1000px) { display: flex; align-items: center; }
+`;
+const CartWrapper = styled.div`position: relative; margin-left: 1rem; cursor: pointer;`;
+const CartCount = styled.span`
+  background: red; color: #fff; border-radius: 50%;
+  font-size: 0.75rem; width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  position: absolute; top: -6px; right: -10px;
+`;
+const CartDropdown = styled.div`
+  position: absolute; top: 36px; right: 0; background: #fff; border: 1px solid #ddd;
+  padding: 1rem; width: 280px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); z-index: 1000;
+`;
+const CartItem = styled.div`
+  display: flex; justify-content: space-between; margin-bottom: 0.75rem; font-size: 0.9rem;
+`;
+const CartImage = styled.img`
+  width: 48px; height: 48px; object-fit: cover; border-radius: 4px; margin-right: 0.75rem;
+`;
+const RemoveButton = styled.button`
+  background: none; border: none; color: #f00; cursor: pointer; font-size: 1.3rem; margin-left: 0.5rem;
+`;
+const Subtotal = styled.div`border-top: 1px solid #ddd; margin-top: 0.5rem; padding-top: 0.5rem;`;
+const CheckoutNote = styled.div`font-size: 0.75rem; color: #777; margin-top: 0.3rem 0 0.8rem;`;
+const StyledLink = styled(Link)`
+  display: block; text-align: center; background: #000; color: #fff; padding: 0.5rem; text-decoration: none;
+  &:hover { background: #333; }
+`;
+const WishlistWrapper = styled.div`position: relative; margin-left: 1rem; cursor: pointer;`;
+const WishlistCount = styled.span`
+  background: #ff4081; color: #fff; border-radius: 50%; font-size: 0.75rem;
+  width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+  position: absolute; top: -6px; right: -10px;
+`;
+const EmptyCart = styled.div`padding: 1rem; text-align: center; color: #777;`;
 
-  @media (min-width: 1000px) {
-    align-items: center;
-    display: flex;
+const SearchInput = styled.input`
+  width: 70%; padding: 0.5rem; font-size: 1rem; border: 1px solid #ccc; border-radius: 4px;
+`;
+
+const SearchButton = styled.button`
+  padding: 0.5rem 1rem; margin-left: 1rem; background: #000; color: white; border: none; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+`;
+
+const ResultList = styled.ul`
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-top: none;
+  margin: 0;
+  padding: 1rem;
+  list-style: none;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  z-index: 1000;
+  li { 
+    margin-bottom: 0.75rem; 
+    display: flex; 
+    align-items: center; 
+    gap: 1rem;
+    &:last-child { margin-bottom: 0; }
+  }
+`;
+
+const SearchForm = styled.form`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+const LoadingSpinner = styled.div`
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`;
+
+const LoadingContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  color: #777;
+  
+  p {
+    margin: 0;
   }
 `;
