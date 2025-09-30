@@ -102,7 +102,6 @@ const twentyTwentyTheme = {
         state.theme.isSearchModalOpen = false;
       },
     },
-    woocommerceHandler,
   },
   libraries: {
     html2react: {
@@ -112,9 +111,9 @@ const twentyTwentyTheme = {
        * You can add your own processors too.
        */
       processors: [image, link],
-      source: {
-        handlers: [productCategoryHandler],
-      },
+    },
+    source: {
+      handlers: [productCategoryHandler, woocommerceHandler],
     },
   },
 };
