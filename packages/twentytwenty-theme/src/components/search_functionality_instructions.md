@@ -12,6 +12,7 @@ The search functionality has been updated to provide a better user experience. T
 4.  **Multiple Category Matches:** The search results can now display multiple matching categories.
 5.  **Improved UI:** The category tile has been styled to include the site logo, a "View all" message, and an arrow icon.
 6.  **Auto-close Overlay:** The search results overlay now closes automatically when a search result (product or category) is clicked.
+7.  **Search Tracking:** All search queries and clicks on search results (products and categories) are now tracked and sent to a custom WordPress plugin.
 
 ## Modified Files
 
@@ -170,4 +171,38 @@ const CategoryTile = styled.div`
     margin-right: 1rem;
   }
 `;
+```
+
+### 6. Search Tracking
+
+A `trackSearch` function was added to the `Header` component to send search data to a custom WordPress REST API endpoint.
+
+```javascript
+  const trackSearch = (searchQuery, clickedItemId = null, itemType = null) => {
+    axios.post(`${getWpBaseUrl(state)}/wp-json/search-tracker/v1/track`, {
+      search_query: searchQuery,
+      clicked_item_id: clickedItemId,
+      item_type: itemType,
+    }).catch(error => {
+      console.error("Error tracking search:", error);
+    });
+  };
+```
+
+This function is called in two places:
+
+1.  When a search is performed in the `performSearch` function:
+
+```javascript
+    trackSearch(searchQuery);
+```
+
+2.  When a user clicks on a category or product in the search results:
+
+```javascript
+// Category click
+<CategoryTile key={category.id} onClick={() => trackSearch(query, category.id, 'category')}>
+
+// Product click
+<li key={product.id} onClick={() => trackSearch(query, product.id, 'product')}>
 ```

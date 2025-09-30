@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { connect, styled } from "frontity";
 import Link from "./link";
-import { getCart, removeCartItem, removeFromCart, getWishlist } from "../utils";
+import { getCart, removeCartItem, removeFromCart, getWishlist, getWpBaseUrl } from "../utils";
+import axios from "axios";
 
 const Header = ({ state, actions }) => {
   const { headerBg } = state.theme.colors;
@@ -211,6 +212,16 @@ const Header = ({ state, actions }) => {
     return () => window.removeEventListener("wishlistUpdated", loadWish);
   }, []);
 
+  const trackSearch = (searchQuery, clickedItemId = null, itemType = null) => {
+    axios.post(`${getWpBaseUrl(state)}/wp-json/search-tracker/v1/track`, {
+      search_query: searchQuery,
+      clicked_item_id: clickedItemId,
+      item_type: itemType,
+    }).catch(error => {
+      console.error("Error tracking search:", error);
+    });
+  };
+
   // ───── Search Logic ─────
   const performSearch = async (searchQuery) => {
     if (!searchQuery.trim()) {
@@ -224,6 +235,8 @@ const Header = ({ state, actions }) => {
 
     setIsSearching(true);
     setShowSearchResults(true);
+
+    trackSearch(searchQuery);
 
     // Find matching categories
     const matches = allCategories.filter((cat) =>
@@ -336,8 +349,8 @@ const Header = ({ state, actions }) => {
           {(showSearchResults && (searchPerformed || isSearching)) && (
             <ResultList>
               {matchedCategories.map((category) => (
-                <CategoryTile key={category.id} onClick={closeSearch}>
-                  <Link link={`/product-category/${category.slug}/`}>
+                <CategoryTile key={category.id} onClick={() => trackSearch(query, category.id, 'category')}>
+                  <Link link={`/product-category/${category.slug}/`} onClick={closeSearch}>
                     <img src={headerData.logo} alt="logo" />
                     <span>View all {category.name}</span>
                     <span>&rarr;</span>
@@ -352,8 +365,8 @@ const Header = ({ state, actions }) => {
                   </LoadingContainer>
                 ) : results.length > 0 ? (
                   results.map((product) => (
-                    <li key={product.id} onClick={closeSearch}>
-                      <Link link={`/product/${product.slug}`}>
+                    <li key={product.id} onClick={() => trackSearch(query, product.id, 'product')}>
+                      <Link link={`/product/${product.slug}`} onClick={closeSearch}>
                         <img src={product.images[0]?.src} alt={product.name} width="40" />
                         {product.name}
                       </Link>
