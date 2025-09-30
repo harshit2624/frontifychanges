@@ -16,6 +16,8 @@ const Header = ({ state, actions }) => {
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [matchedCategories, setMatchedCategories] = useState([]);
+  const [allCategories, setAllCategories] = useState([]);
   const [headerData, setHeaderData] = useState(null);
   const [token, setToken] = useState(null);
   const [Mobile, setMobile] = useState(false);
@@ -27,8 +29,15 @@ const Header = ({ state, actions }) => {
   const searchRef = useRef(null);
   const searchTimeoutRef = useRef(null);
 
+  const closeSearch = () => {
+    setShowSearchResults(false);
+    setQuery("");
+    setResults([]);
+    setMatchedCategories([]);
+    setSearchPerformed(false);
+  };
+
   useEffect(() => {
-    console.log(link, 'linklink');
     if (window?.innerWidth <= 767 && link?.includes('product')) {
       setMobile(true);
       setisProductPage(true);
@@ -94,6 +103,19 @@ const Header = ({ state, actions }) => {
         localStorage.setItem('headerData', JSON.stringify(data));
       })
       .catch((e) => console.error("Header fetch error:", e));
+
+    // Fetch categories
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch("https://www.croscrow.com/a/wp-json/wc/v3/products/categories?per_page=100&consumer_key=ck_2732dde9479fa4adf07d8c7269ae22f39f2c74a5&consumer_secret=cs_14996e7e8eed396bced4ac30a0acfd9fea836214");
+        const data = await response.json();
+        setAllCategories(data);
+      } catch (error) {
+        console.error("Error fetching categories:", error);
+      }
+    };
+
+    fetchCategories();
   }, []);
 
   useEffect(() => {
@@ -103,19 +125,13 @@ const Header = ({ state, actions }) => {
       }
 
       if (searchRef.current && !searchRef.current.contains(event.target)) {
-        setSearchPerformed(false);
-        setResults([]);
-        setQuery("");
-        setShowSearchResults(false);
+        closeSearch();
       }
     };
 
     const handleScroll = () => {
       setShowCart(false);
-      setSearchPerformed(false);
-      setResults([]);
-      setQuery("");
-      setShowSearchResults(false);
+      closeSearch();
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -202,11 +218,19 @@ const Header = ({ state, actions }) => {
       setSearchPerformed(false);
       setIsSearching(false);
       setShowSearchResults(false);
+      setMatchedCategories([]);
       return;
     }
 
     setIsSearching(true);
     setShowSearchResults(true);
+
+    // Find matching categories
+    const matches = allCategories.filter((cat) =>
+      cat.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
+    );
+    setMatchedCategories(matches);
+
     try {
       const res = await fetch(
         `https://www.croscrow.com/a/wp-json/wc/v3/products?search=${encodeURIComponent(
@@ -311,6 +335,15 @@ const Header = ({ state, actions }) => {
 
           {(showSearchResults && (searchPerformed || isSearching)) && (
             <ResultList>
+              {matchedCategories.map((category) => (
+                <CategoryTile key={category.id} onClick={closeSearch}>
+                  <Link link={`/product-category/${category.slug}/`}>
+                    <img src={headerData.logo} alt="logo" />
+                    <span>View all {category.name}</span>
+                    <span>&rarr;</span>
+                  </Link>
+                </CategoryTile>
+              ))}
               <div className="searchGrid">
                 {isSearching ? (
                   <LoadingContainer>
@@ -319,7 +352,7 @@ const Header = ({ state, actions }) => {
                   </LoadingContainer>
                 ) : results.length > 0 ? (
                   results.map((product) => (
-                    <li key={product.id}>
+                    <li key={product.id} onClick={closeSearch}>
                       <Link link={`/product/${product.slug}`}>
                         <img src={product.images[0]?.src} alt={product.name} width="40" />
                         {product.name}
@@ -370,7 +403,7 @@ const Header = ({ state, actions }) => {
                 strokeLinejoin="round"
               >
                 <path
-                  d="M20.84 4.61a5.6 5.6 0 0 0-7.93 0L12 5.52l-0.91-0.91a5.6 5.6 0 0 0-7.93 7.93l0.91 0.91L12 21.8l7.93-7.93 0.91-0.91a5.6 5.6 0 0 0 0-7.93z"
+                  d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-.06.06a5.5 5.5 0 0 0-7.78 7.78l.06.06L12 21.8l7.78-7.78.06-.06a5.5 5.5 0 0 0 0-7.78z"
                 />
               </svg>
               {wishlist.length > 0 && <WishlistCount>{wishlist.length}</WishlistCount>}
@@ -524,6 +557,25 @@ const ResultList = styled.ul`
     align-items: center; 
     gap: 1rem;
     &:last-child { margin-bottom: 0; }
+  }
+`;
+
+const CategoryTile = styled.div`
+  background: #eee;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #333;
+    text-decoration: none;
+    font-weight: bold;
+  }
+  img {
+    height: 30px;
+    width: auto;
+    margin-right: 1rem;
   }
 `;
 
